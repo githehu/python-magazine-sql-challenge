@@ -1,0 +1,1 @@
+# python-magazine-sql-challenge
