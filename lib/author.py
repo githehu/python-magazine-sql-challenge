@@ -1,36 +1,38 @@
 from .database_utils import get_connection
 
 class Author:
-    def __init__(self, id=None, name=None, email=None):
+    def __init__(self, id=None, name=None):
         self.id = id
-        self.name = name  # use property setter
-        self.email = email
-     # Property with validation
+        self._name = None
+        self.name = name
+
+    # --------------------------
+    # Property validation
+    # --------------------------
     @property
     def name(self):
         return self._name
-    
+
     @name.setter
     def name(self, value):
         if not isinstance(value, str) or len(value.strip()) == 0:
-            raise ValueError("Author name must be a non-empty string.")
+            raise ValueError("Name must be a non-empty string.")
         self._name = value.strip()
-    
-     # Relationships
 
+    # --------------------------
+    # Relationship methods
+    # --------------------------
     def articles(self):
-        """Return all articles written by this author."""
+        from .article import Article
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM articles WHERE author_id = ?", (self.id,))
         rows = cursor.fetchall()
         conn.close()
-        from .article import Article  # lazy import to avoid circular dependency
         return [Article.new_from_db(row) for row in rows]
 
-
     def magazines(self):
-        """Return all magazines this author has contributed to."""
+        from .magazine import Magazine
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("""
@@ -40,24 +42,17 @@ class Author:
         """, (self.id,))
         rows = cursor.fetchall()
         conn.close()
-
-        from .magazine import Magazine  # lazy import to avoid circular dependency
         return [Magazine.new_from_db(row) for row in rows]
 
-        #database method to get magazines for an author
-
-
-    
-
-
+    # --------------------------
+    # Database methods
+    # --------------------------
     @classmethod
     def new_from_db(cls, row):
-        """Instantiate an Author object from a DB row tuple."""
-        return cls(id=row[0], name=row[1], email=row[2])
+        return cls(id=row[0], name=row[1])
 
     @classmethod
     def find_by_id(cls, id):
-        """Find an author by ID and return an Author instance."""
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM authors WHERE id = ?", (id,))
@@ -66,25 +61,33 @@ class Author:
         return cls.new_from_db(row) if row else None
 
     def save(self):
-        """Insert a new author or update an existing one."""
-        # Use a context manager so the connection is always closed even on error.
-        # sqlite3's Connection supports the context manager protocol where
-        # entering returns the connection and exiting commits (or rolls back on
-        # exception) and closes the connection.
-        with get_connection() as conn:
-            cursor = conn.cursor()
-
+        conn = get_connection()
+        cursor = conn.cursor()
+        try:
             if self.id is None:
-                cursor.execute(
-                    "INSERT INTO authors (name, email) VALUES (?, ?)",
-                    (self.name, self.email)
-                )
+                cursor.execute("INSERT INTO authors (name) VALUES (?)", (self.name,))
                 self.id = cursor.lastrowid
             else:
-                cursor.execute(
-                    "UPDATE authors SET name = ?, email = ? WHERE id = ?",
-                    (self.name, self.email, self.id)
-                )
+                cursor.execute("UPDATE authors SET name = ? WHERE id = ?", (self.name, self.id))
+            conn.commit()
+            print(f"✅ Author saved: {self.name}")
+        except Exception as e:
+            print(f"❌ Error saving author: {e}")
+        finally:
+            conn.close()
 
-        # connection committed and closed by context manager
-        print(f"\u2705 Author saved: {self.name}")
+    # --------------------------
+    # Phase 4: Aggregate / Bonus
+    # --------------------------
+    def add_article(self, magazine, title, content=""):
+        """Create and save a new Article for this author in a given magazine."""
+        from .article import Article
+        article = Article(title=title, content=content, author=self, magazine=magazine)
+        article.save()
+        return article
+
+    def topic_areas(self):
+        """Return a list of unique categories from all magazines this author writes for."""
+        magazines = self.magazines()
+        categories = {m.category for m in magazines if m.category}
+        return list(categories)
